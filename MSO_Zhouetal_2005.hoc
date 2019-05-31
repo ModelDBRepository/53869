@@ -1,0 +1,1244 @@
+// *****************  Coincidence Detector 2.0  **********************
+
+// ------------  Introduction   --------------------------------  
+// 01/01/2005
+// This model simulates interaural time difference (ITD) dependent 
+// responses in the Medial Superio Olive (MSO) of the mammalian brainstem. 
+// Model configurations and simulation methods are described in 
+// Zhou, Carney, and Colburn (2005) J. Neuroscience, 25(12):3046-3058   
+
+// Ionic channels: ILTK, IHTK, Ina, Ih, Il from TypeII VCN cells 
+// in Rothman and Manis (2003c) J Neurophysiol 89:3097-113 
+
+// ------------  Model file structure   ------------------------
+// Part I: Membrane and synapse setup
+// Part II: Data processing and rate-ITD measurements 
+// Part III: User interface setup 
+//--------------------------------------------------------------
+
+
+
+
+
+// ******* Codes start here ****************************************
+
+seed_x=xred("Please choose a random seed number <1,1000>", 1, 1, 1000) //string,default,min,max
+
+
+
+//------------------  Part I ---------------------------------------
+// *** cell membrane and synapse descriptions ***
+// This section defines the geometry and membrane properties of a bipolar MSO model.
+// Excitatory and inhibitory synapses are implemented by the point-process tool in NEURON.
+// Mod files associated with this section include:
+// kHT_VCN2003.mod  kLT_VCN2003.mod  na_VCN2003.mod ih_VCN2003.mod  Alpha.mod
+
+
+//****  cell template *****
+//-----------------------------
+
+  begintemplate  Cell
+
+ 	public soma, axon, dend
+	create soma,axon,dend[1]
+
+  	proc init() {
+        	ndend=$1
+		create soma,axon,dend[ndend]
+        
+	soma {
+        	nseg = 1    
+        	diam = 20  // um   
+        	L = 40     // um
+        	Ra=200   //ohm.cm   
+        	cm=1     //uF/cm2  
+        	
+        	insert kHT_VCN2003
+		insert kLT_VCN2003
+		insert na_VCN2003
+		insert ih_VCN2003
+		
+		ek=-70     //mV
+		ena=55
+		eh=-43
+		
+		gkbar_kHT_VCN2003 = 0   //S/cm2  
+		gkbar_kLT_VCN2003=0 
+		gnabar_na_VCN2003= 0.1    
+		ghbar_ih_VCN2003=0   
+		gl_na_VCN2003=0.002	
+  		  	
+		
+        	
+    	}
+    	axon {
+            	nseg = 51  
+        	diam = 2
+        	L = 400 //um^2
+        	Ra=200   //ohm.cm   
+		cm=1     //uF/cm2  
+
+        	insert kHT_VCN2003
+		insert kLT_VCN2003
+		insert na_VCN2003
+		insert ih_VCN2003
+		ek=-70
+		ena=55
+		eh=-43
+	
+		// total G[nS]=gkbar*area*10
+		
+        	
+		gkbar_kHT_VCN2003 = 0.02   	//S/cm2
+		gkbar_kLT_VCN2003=0.03 	
+		gnabar_na_VCN2003= 0.3    
+		ghbar_ih_VCN2003=0.0015   
+		gl_na_VCN2003=0.002	
+    	}
+
+	for i = 0, ndend-1 dend[i] {
+        	L = 200    //um   
+        	nseg = 20  
+        	diam= 3   // um
+        	Ra=200   //ohm.cm  
+		cm=1     //uF/cm2  
+
+        	insert pas   
+		e_pas=-65  
+		g_pas=0.002   
+    	}
+  
+     	connect dend[0](0), soma(0) 
+     	connect dend[1](0), soma(1) 
+	connect axon(0), dend[1](0.225)  //  4.5/20 nseg(45um)      
+     
+  }
+  
+   endtemplate Cell
+ //------- END cell template --------------------------------
+ //----------------------------------------------------------
+
+  
+  load_file("nrngui.hoc")
+ 
+  objectvar  maincell
+  nmaindend =2   // two dendrites
+  maincell = new Cell(nmaindend)
+  access maincell.soma  
+
+
+
+
+
+  //**** Excitatory and inhibitory synapses **************** 
+  //---------------------------------------------------------
+  
+  //----     parameter description     ----------------------
+  //syn0[]: E alpha synapses on contralateral dendrite, dend0
+  //syn1[]: E alpha synapses on ipsilateral dendrite, dend1
+  //gen0[]: E stimuli to syn0
+  //gen1[]: E stimuli to syn1
+  //netcon0[]: input- E synapse connection on dend0
+  //netcon1[]: input- E synapse connection on dend1
+
+  //syn_inhi0[]:  I alpha synapse on the soma
+  //gen_inhi0[]:  I stimuli to syn_inhi0
+  //netcon_inhi0[]: input- I synapse connection on the soma
+  
+ 
+  // ************ Excitatory synapses on two dendrites  ********
+  objectvar syn0[10], gen0[10],syn1[10], gen1[10]
+  
+     //----- add spike, virtual spikes
+     for i=0, 9{
+                gen0[i] = new GaussStim(0.5)
+		gen0[i].interval=2   // [ms] input period
+  		gen0[i].start=0	  //  [ms] arrival time of input spikes
+		gen0[i].number=10000
+		gen0[i].factor=20	   // phase-locking factor F
+		
+		gen1[i] = new GaussStim(0.5) 
+		gen1[i].interval=2   
+  		gen1[i].start=0	 
+  		gen1[i].number=10000
+		gen1[i].factor=20	   
+		
+		gen0[i].seed(seed_x+i)
+                gen1[i].seed(seed_x+10+i)
+  	} 
+ 
+ 	//----- add EE expsyn at dend0
+  	maincell.dend[0] {  //contra side
+		for i=0,9 { 
+		n=20  //n=nseg  doesn't change after nseg
+		syn0[i] = new Alpha(i*1/n+1/n/2)  // scatter along the firsthalf dend
+
+		syn0[i].tau1 =0.1  //ms    
+		syn0[i].tau2 =0.1   //ms
+		syn0[i].con=11    //nS- mho
+		syn0[i].e =0   // mV
+			}                            
+   		}
+
+  	maincell.dend[1] { //ipsi side
+  		for i=0,9 {
+		n=20  //n=nseg  
+		syn1[i] = new Alpha(i*1/n+1/n/2)
+		
+		syn1[i].tau1 =0.1  //ms    may add some jitters
+		syn1[i].tau2 =0.1   //ms
+		syn1[i].con=11    //nS-mho
+		syn1[i].e =0   // mV
+    			}     
+		}
+  
+   
+   //---  Connect gen[] with syn[] 
+   	objref netcon0[10],netcon1[10]
+
+    	Rave_E_contra=240 // spikes/sec
+	Rave_E_ipsi=240 
+      
+	// x_thres controls the prob. of passing a spike
+
+    	x_thres_contra=1-Rave_E_contra*gen0[0].interval/1000        //   prob(x>1-p)=p
+    	x_thres_ipsi=1-Rave_E_ipsi*gen1[0].interval/1000        
+      
+       if (x_thres_contra<=0) {x_thres_contra=1e-4} 
+       if (x_thres_ipsi<=0) {x_thres_ipsi=1e-4} 
+
+        
+    	e_delay=0  // no synaptic delay
+    
+    	for i=0,9  { 
+    		netcon0[i]=new NetCon(gen0[i], syn0[i],x_thres_contra,e_delay,0.001) 
+    										//thres delay gain[uS]
+		netcon1[i]=new NetCon(gen1[i], syn1[i],x_thres_ipsi,e_delay,0.001) 
+										//thres delay gain[uS]
+       	}
+  
+  //---------------------------------------------------------
+  
+
+  // ************ Inhibitory synapses on the soma  ******** 
+   
+  objectvar syn_inhi0[10], gen_inhi0[10], syn_inhi1[10], gen_inhi1[10]
+  //----------  gen_inhi -----------------
+  	for i=0,9{	 	
+  		gen_inhi0[i]=new GaussStim(0.5)  //  contralateral inputs
+  		gen_inhi0[i].interval=2   
+  		gen_inhi0[i].start=0
+  		gen_inhi0[i].number=10000
+  		gen_inhi0[i].factor=10
+  		gen_inhi0[i].seed(seed_x+30+i)
+
+  		gen_inhi1[i]=new GaussStim(0.5)  //  ipsilateral inputs
+    		gen_inhi1[i].interval=2   
+    		gen_inhi1[i].start=0
+    		gen_inhi1[i].number=10000
+    		gen_inhi1[i].factor=10
+    		gen_inhi1[i].seed(seed_x+50+i)
+ 	} 	
+ 
+ 
+ 	
+  //----------- syn_inhi at soma-----------------  
+    
+    maincell.soma {
+	for i=0,9{	 
+		syn_inhi0[i] = new Alpha(0.5)  
+		syn_inhi0[i].tau1 =0.1  //ms      
+		syn_inhi0[i].tau2 =2   //ms
+		syn_inhi0[i].con=0    //umho
+		syn_inhi0[i].e =-70   // mV                            
+  		 }
+	
+   	 for i=0,9{	 
+		syn_inhi1[i] = new Alpha(0.5)
+		syn_inhi1[i].tau1 =0.1  //ms    
+		syn_inhi1[i].tau2 =2   //ms
+		syn_inhi1[i].con=0    //umho
+		syn_inhi1[i].e =-70   // mV   
+	     }
+	}
+
+  //----------  Connect gen[] with syn[] ---------------
+  I_delay0=0  
+  I_delay1=0  // no synaptic delay
+  
+  objref netcon_inhi0[10],netcon_inhi1[10]
+  
+      Rave_I_contra=240 // spikes/sec
+      Rave_I_ipsi=240 
+
+      x_thres_I_contra=1-Rave_I_contra*gen_inhi0[0].interval/1000        //   prob(x>1-p)=p
+      x_thres_I_ipsi=1-Rave_I_ipsi*gen_inhi1[0].interval/1000        
+
+       if (x_thres_I_contra<=0) {x_thres_I_contra=1e-4} 
+       if (x_thres_I_ipsi<=0) {x_thres_I_ipsi=1e-4} 
+	
+  
+ for i=0,9{
+  netcon_inhi0[i]=new NetCon(gen_inhi0[i], syn_inhi0[i],x_thres_I_contra,I_delay0,0.001) 
+  netcon_inhi1[i]=new NetCon(gen_inhi1[i], syn_inhi1[i],x_thres_I_ipsi,I_delay1,0.001) 
+	}
+
+//-------- END synapse setup  -------------------------------------
+  
+
+  
+  //****  procedure  "reset the resting leaky battery"   ****
+  //----------------------------------------------------------- 
+  
+  v_init=-65
+  celsius=38      	
+
+proc reset_membrane() {
+  finitialize(v_init) 
+  fcurrent()  // make sure that leak current balance the non-leak current
+  maincell.soma { 	
+        print "gl_na_VCN2003=[S/cm^2]=",gl_na_VCN2003
+        print "soma el=",el_na_VCN2003=(ina+ik+ih+gl_na_VCN2003*v_init)/gl_na_VCN2003 
+	print "g_rest=S/cm2  ",g_rest1=gl_na_VCN2003+gk_kLT_VCN2003+gk_kHT_VCN2003+gna_na_VCN2003+gh_ih_VCN2003
+	print "tau_rest=",cm/(g_rest1*1000)
+	}
+  maincell.axon { print "axon el=",el_na_VCN2003=(ina+ik+ih+gl_na_VCN2003*v_init)/gl_na_VCN2003
+	print "g_rest=S/cm2  ",g_rest3=gl_na_VCN2003+gk_kLT_VCN2003+gk_kHT_VCN2003+gna_na_VCN2003+gh_ih_VCN2003
+	print "tau_rest=",cm/(g_rest3*1000)
+	}
+ maincell.dend[0] {
+	 print "dendrite el=", e_pas=v_init
+         print " dend g_rest=S/cm2  ",g_rest2=g_pas
+	 print "tau_rest=",cm/(g_rest2*1000)
+        }	
+ maincell.dend[1] {
+	 e_pas=v_init
+        }	
+ 
+  fcurrent()  
+  
+}
+   
+reset_membrane()  
+
+//-------- END reset_membrane  ------------------------------
+     
+//------------------  END PART I -----------------------------------
+
+
+
+
+  
+//------------------  PART II ---------------------------------------  
+//*** data analysis and rate-ITD response ***
+// In this section, synaptic inputs are integrated and membrane potentials 
+// are calculated at discrete time steps. The rate-ITD response at one ITD 
+// and/or at different ITDs (-1ms~ 1ms) are measured.  
+
+// Model responses to ITDs are tested with and without inhibition. 
+
+// The model discharges at one stimulus ITD condition are stored in two vectors: 
+// v_ISI for the event time of action potentials and v_voltage for the membrane potential 
+// at each integration time step. Statistics of discharge patterns are processed 
+// at the end of the program running, such as the post-stimulus time histogram, 
+// the inter-spike interval histograms, and firing rates. 
+
+// The overall rate-ITD responses and firing patterns can also be saved into binary files for further analysis. 
+
+
+ 
+  
+    
+ //----  parameter and data vector descriptions     ------------ 
+
+  // v_ISI: [ms]  AP event time
+  // v_voltage: [mV]  membrane potentials at each dt
+  // pre_E,pre_I: [ms] E/I input event time 
+  
+  tstop=1000   	// [ms]  stimulus duration
+  dt=0.025   	// [ms]  simulation time step
+  bin=0.1 	// [ms]  binwidth of APs  
+  
+  cvode.active(0)   // constant integration time step
+
+
+  access maincell.axon 
+
+  objref apc,v_ISI,v_voltage
+  objref pre_E,pre_I_contra,pre_I_ipsi
+  
+  v_ISI=new Vector()
+  v_voltage=new Vector(tstop/dt+2,0)
+  
+  pre_E=new Vector()
+  pre_I_contra=new Vector()
+  pre_I_ipsi=new Vector()
+  
+  
+  //==== counting APs 
+  AP_threshold=-10 	   //[mV] AP detection threshold 
+  apc = new APCount(0.5)   // measure action potenials at the midpoint of the axon
+  apc.thresh=AP_threshold
+  
+  //==== saving event times and membrane potentials
+  apc.record(v_ISI) //record event time
+  v_voltage.record(&maincell.axon.v(0.5),dt) 
+
+
+
+  //==== monitoring input events
+  netcon0[0].record(pre_E)		//record input event time
+  netcon_inhi0[0].record(pre_I_contra)  //record input event time
+  netcon_inhi1[0].record(pre_I_ipsi)    //record input event time
+    
+  
+  //-------- END  ---------------------------------
+  //-----------------------------------------------
+  
+
+
+
+  //****  function  "psth": post-stimulus time histogram **** 
+  //-----------------------------------------------
+  //----  data vector description     ------------ 
+  //v_save: bin v_voltage for each run
+  //v_all: summation of all v_save over trials
+  //v_psth: PSTH vector
+  
+  objref v_save,v_all,v_psth
+  objref g_psth,x_psth
+  objref d, xtime
+  
+  bin_psth=bin
+  proc psth() {
+		length_psth=tstop/bin  //length of period points
+		
+		v_psth=new Vector(v_all.size,0)   
+		v_psth.add(v_all)
+		
+		x_psth= new Vector(length_psth,0)
+		x_psth.indgen(bin)
+		g_psth= new Graph()
+		g_psth.size(0,tstop,0,10)
+  		g_psth.align(0.5,0.2)
+  		g_psth.label(0.9,0.2,"time")
+  		g_psth.label(0.1,0.9,"PSTH")
+                v_psth.plot(g_psth,x_psth,2,2)
+		
+  }
+  
+  //---  END psth () ------------------------------
+  //-----------------------------------------------
+  
+
+
+
+  //****  function  "pth": period time histogram  **** 
+  //-----------------------------------------------
+  //----  data vector description     ------------
+  // v_save: bin v_voltage for each run
+  // v_pth: wrap v_all with length=gen.interval/bin and normalize
+  // vs_real: vector strength
+  // phase_real: mean phase 
+
+  // get_pth(): get v_save from each run
+  
+  
+  objref v_pth, g_pth, x_pth
+  
+  proc get_pth() { 
+		v_save=new Vector(L_PTH)
+  		v_save.spikebin(v_voltage,AP_threshold) //(v_source, threshold)
+		v_save.rebin(v_save,bin/dt)  // rebin the time axis
+		v_all.add(v_save)   // add all trials
+  	}
+  	
+  proc pth() { 
+  		x=0
+  		y=0
+  		vs_real=0
+  		angel_real=0
+		length=gen0[0].interval/bin  //length of period points
+		
+		N_fold=v_all.size/length
+		v_pth= new Vector(length,0)
+		x_pth= new Vector(length,0)  // phase vector
+		x_pth.indgen(1/length)
+		
+		//==== wrapping over one period
+		for i=0,N_fold-1 { 
+			for j=0,length-1 {
+					v_pth.x[j]=v_pth.x[j]+v_all.x[length*i+j]
+							}
+			}
+		v_pth.div(v_pth.sum)
+		
+		//==== calculate the VS and mean phase of responses
+		for i=0,length-1 {
+			x=x+v_pth.x[i]*cos(2*PI*i/length)
+			y=y+v_pth.x[i]*sin(2*PI*i/length)
+		}
+		vs_real=sqrt(x^2+y^2)     //compute VS
+		print "VS=",vs_real
+		
+		angel_real=atan(y/x)
+			if(x<0 ) { angel_real=angel_real+PI
+					} else if (y<0 && x>0) {
+						angel_real=angel_real+2*PI
+						}	
+		print "Phase=",angel_real/(2*PI)
+		
+		
+  		g_pth.size(0,1,0,0.3)
+  		g_pth.align(0.5,0.2)
+  		//g_pth.label(0.9,0.1,"Phase")
+  		g_pth.label(0.3,0.9,"Period Hist")
+  		g_pth.begin() 
+		v_pth.mark(g_pth,x_pth,"+",9,1)
+		v_pth.line(g_pth,x_pth,1,2)
+		
+  				  		
+}
+
+  proc VS() {
+		vs=exp(-PI^2/(2*gen0[0].factor^2))
+	}
+  
+  
+  //-------------- END pth () -------------------------
+  //---------------------------------------------------
+
+
+
+
+
+  //****  function  "ISI": interspike interval  **** 
+  //-----------------------------------------------
+  //----  data vector description     ------------
+  
+  // v_ISI: event times
+  // bin_ISI : bin width of ISI	
+  // hist_ISI: histogram of ISI for all run
+  // hist: histogram of ISI for each run
+  // mean_T, sq_T, num_T: ISI statistics for each run
+
+  // get_ISI(): get data for each run
+  
+  objref hist_ISI,xtime,g_ISI,hist
+  objref mean_T, sq_T, num_T
+  objref temp,t1, v1,v2   // operating vectors 
+  
+  mean_ISI=0
+  OVF=0    // overflow
+  EI=0
+  
+  mean_ISI2=0
+  std_ISI=0
+  sq_sum=0
+  CV_ISI=0
+  
+  proc get_ISI() {
+  		
+  		v2=new Vector(L_ISI,0)
+  		v1=new Vector(L_ISI,0)
+  		
+  		
+  		v1.add(v_ISI)
+  		v2.add(v_ISI)
+  		v1.rotate(1) // right shift
+  		v2.sub(v1)
+  		v2.rotate(-1)
+  		v2.resize(v2.size-1)  // cut off the initial interval
+  		print "mean ISI interval   ", v2.mean
+  		print "ISI std    ",v2.stdev
+  		 
+  		temp = new Vector(v2.size,0)
+  		temp.add(v2)
+  		temp.sub(v2.mean)  // for calculate the square sum
+  		
+  		mean_T.x[N_run-1]=v2.mean
+  		num_T.x[N_run-1]=v2.size
+  		sq_T.x[N_run-1]=temp.sumsq()
+  		
+  		mean_ISI=v2.mean + mean_ISI  // mean ISI for each run
+  
+  		print "**********************************"
+  		
+  		hist=v2.histogram(0, topbin+OVFbin, bin_ISI) 
+		
+  		if(hist.size-hist_ISI.size==1) { hist.resize(hist_ISI.size)} 
+  		hist_ISI.add(hist)
+		
+  	}	
+  	
+  proc ISI() {
+  		hist_ISI.div(hist_ISI.sum)  //normalize
+  		OVF=hist_ISI.sum(topbin/bin_ISI, (topbin+OVFbin)/bin_ISI-1)
+  		EI=hist_ISI.sum(0,1.5*T/bin_ISI-1)   // the first whole interval
+  		
+		hist_ISI.resize(topbin/bin_ISI+1)
+		
+  		xtime=new Vector(hist_ISI.size,0)
+  		xtime.indgen(bin_ISI)
+  		
+  		g_ISI.size(0,topbin,0,0.3)
+  		g_ISI.align(0.5,0.5)
+  		//g_ISI.label(0.9,0.2,"T")
+  		g_ISI.label(0.2,0.9,"ISI")
+  		g_ISI.beginline()  
+  		hist_ISI.mark(g_ISI,xtime,"o",6,1)
+  		hist_ISI.line(g_ISI,xtime,1,2)
+		
+  		
+  		//==== calculate the mean and the std of intervals  
+   		t1=new Vector(N_run,0)
+   		t1.add(mean_T)
+   		t1.mul(num_T)
+   		
+   
+   		t2=t1.sum()
+   		mean_ISI2=t2/num_T.sum()  //overall ISI mean 
+  		
+  		t1=new Vector(N_run,0)
+  		t1.add(mean_T)
+  		t1.sub(mean_ISI2)
+  		t1.mul(t1)
+  		t1.mul(num_T)
+  		sq_sum=sq_T.sum()+t1.sum()
+  		
+  		if(num_T.sum()>1) {
+  			std_ISI=sqrt(sq_sum/(num_T.sum-1))   //Overall ISI std
+  		} else { std_ISI=sqrt(sq_sum) } 
+  		
+  		if(mean_ISI2>0) {
+  				CV_ISI=std_ISI/mean_ISI2   //coefficient of variation
+  			} else{ CV_ISI=1
+  		}            
+  		  
+   }
+  
+
+  //----------- END ISI() -------------------------
+  //-----------------------------------------------
+
+
+
+
+
+  //**** procedures:  rate-ITD responses with and without inhibition  ****
+  //----------------------------------------------------------------------
+  //----     data Vecter description
+  // r_mean: discharge rates at different ITDs   
+  // std_mean: standard deviations of rates at different ITDs
+  // vs_ITD, phase-ITD: response VS and mean phases at different ITDs
+
+
+  //----     procedure description     ------------  
+  // reset() : initializing
+  // rerun() : main simulation function, repeat every tstop
+  // integrate(): integration function
+  
+  // Rate_ITD_EI(): rate-ITD response without bilateral excitation contralateral inhibition
+  // getcon(): upgrade new synapse values based on syn0[0], syn1[0], syn_inhi0[0], syn_inhi1[0]print "lamda_DC=[um]"
+  // getstim():upgrade new stimuli values based on gen0[0], gen1[0], gen_inhi0[0], gen_inhi1[0]
+  // savecon(): save synapse parameters 
+  // changelevel(): update new input parameters 
+  	
+  objref v_AP, mean_T, sq_T, num_T     		// rates and spike intervals at one ITD over N_run 
+  objref r_mean,std_mean,vs_ITD, phase_ITD    	// rates at all ITDs
+  objref T_ITD,std_ITD,CV_ITD   	     	// spike interval statistics at all ITDs
+  objref ITD,g_Rate,g_VS,data
+  
+  N_run=10   // ten trials
+  ITD_max=1 //[ms] maximum ITD tested
+
+
+
+ //**** rate-ITD responses with excitation and inhibition  *******************
+ // ITD is defined as the arrival time difference between excitatory inputs on two dendrites.
+ //------------------------------------------------------------
+  
+  proc Rate_ITD_EI() {	
+  	N_run=10
+  	ITD_step=0.05  // [ms] change to finer
+	half_ITD=ITD_max/ITD_step
+  	N_ITD=2*half_ITD+1+2 		// [-ITD_max :0.05:ITD_max C I ]
+  	
+	ITD=new Vector(N_ITD,0)
+	ITD.indgen(ITD_step)
+	ITD.sub(ITD_max)
+
+  	r_mean=new Vector(N_ITD,0)
+  	std_mean=new Vector(N_ITD,0)
+  	vs_ITD=new Vector(N_ITD,0)
+  	phase_ITD=new Vector(N_ITD,0)
+  	
+  	T_ITD=new Vector(N_ITD,0)
+  	std_ITD=new Vector(N_ITD,0)
+  	CV_ITD=new Vector(N_ITD,0)
+  	
+  	save_con()   // save all the initial syn.con
+  	
+  	gen0[0].start=0
+  	gen1[0].start=0
+  	gen_inhi0[0].start=contra_inhi_start  
+  	gen_inhi1[0].start=ipsi_inhi_start	
+  	
+  	
+  	//====  test binaural EI responses 
+
+	for k=0,half_ITD {
+ 	     gen0[0].start=(half_ITD-k)*ITD_step		  // contra delayed
+	     gen_inhi0[0].start=contra_inhi_start+(half_ITD-k)*ITD_step	  // contra inhi delay
+
+ 	     gen1[0].start=0
+             gen_inhi1[0].start=ipsi_inhi_start	  // ipsi inhi delay
+             rerun()
+             
+             r_mean.x[k]=v_AP.mean()
+             if(v_AP.size >1) {std_mean.x[k]=v_AP.stdev()
+		 } else {std_mean.x[k]=0}
+             vs_ITD.x[k]=vs_real
+             phase_ITD.x[k]=angel_real/(2*PI)	
+             
+             T_ITD.x[k]=mean_ISI2
+             std_ITD.x[k]=std_ISI
+             CV_ITD.x[k]=CV_ISI
+             
+             }     
+             
+  	for k=half_ITD+1,2*half_ITD {
+	     gen0[0].start=0
+	     gen_inhi0[0].start=contra_inhi_start
+
+ 	     gen1[0].start=(k-half_ITD)*ITD_step	  // ipsi delayed
+ 	     gen_inhi1[0].start=ipsi_inhi_start	+(k-half_ITD)*ITD_step  // ipsi inhi delay
+             rerun()
+             
+             r_mean.x[k]=v_AP.mean()
+             if(v_AP.size >1) { std_mean.x[k]=v_AP.stdev() 
+		 } else {std_mean.x[k]=0}
+             vs_ITD.x[k]=vs_real
+             phase_ITD.x[k]=angel_real/(2*PI)	
+             
+             T_ITD.x[k]=mean_ISI2
+             std_ITD.x[k]=std_ISI
+             CV_ITD.x[k]=CV_ISI
+             }
+
+         
+        //==== test contra monaural
+        k=2*half_ITD+1
+             gen0[0].start=0
+  	     gen1[0].start=0
+  	     gen_inhi0[0].start=contra_inhi_start  // contra inhi lead 0.1ms
+  	     gen_inhi1[0].start=ipsi_inhi_start		
+  	     
+  	     syn0[0].con=e0
+  	     syn1[0].con=0
+  	     syn_inhi0[0].con=inhi0
+  	     syn_inhi1[0].con=0
+  	     
+  	     
+  	     rerun()
+  	     
+             r_mean.x[k]=v_AP.mean()
+             if(v_AP.size >1) {std_mean.x[k]=v_AP.stdev()
+		} else {std_mean.x[k]=0}
+             vs_ITD.x[k]=vs_real
+             phase_ITD.x[k]=angel_real/(2*PI)	 
+             
+             T_ITD.x[k]=mean_ISI2
+             std_ITD.x[k]=std_ISI
+             CV_ITD.x[k]=CV_ISI
+             
+
+         //==== test ipsi monaural
+            k=2*half_ITD+2
+            gen0[0].start=0
+  	    gen1[0].start=0
+  	    gen_inhi0[0].start=contra_inhi_start			
+  	    gen_inhi1[0].start=ipsi_inhi_start	
+  	    
+  	    syn0[0].con=0
+  	    syn1[0].con=e1
+  	    syn_inhi0[0].con=0
+  	    syn_inhi1[0].con=inhi1
+  	    
+  	     rerun()
+             r_mean.x[k]=v_AP.mean()
+             if(v_AP.size >1) {std_mean.x[k]=v_AP.stdev()
+		} else {std_mean.x[k]=0}
+             vs_ITD.x[k]=vs_real
+             phase_ITD.x[k]=angel_real/(2*PI)
+             
+             
+             T_ITD.x[k]=mean_ISI2
+             std_ITD.x[k]=std_ISI
+             CV_ITD.x[k]=CV_ISI	 
+         
+  print "############################################"
+  print"ITD= -1:0.05:1 C  I "    
+  print"R="
+  r_mean.printf("% 3.2f")
+  print"\nR_std="
+  std_mean.printf("% 2.2f") 
+  print "\nVS="
+  vs_ITD.printf("% 1.4f")
+  print "\nphase="
+  phase_ITD.printf("% 1.4f")  
+  
+  //print "T="
+  //T_ITD.printf("% 2.4f")
+  //print "std_T="
+  //T_ITD.printf("% 2.4f")
+  //print "CV_T="
+  //CV_ITD.printf("% 2.4f")
+  
+
+
+  //====  draw the rate-ITD curve 
+
+  data=new VBox()
+  data.intercept(1)
+  xpanel("")
+  xlabel("Rate")
+  g_Rate=new Graph()
+  g_Rate.beginline()  
+  g_Rate.size(-ITD_max, ITD_max,0, 50)
+  r_mean.plot(g_Rate,ITD,2,2)
+  r_mean.ploterr(g_Rate,ITD,std_mean,10,1,2)
+  xpanel()
+
+  data.intercept(0)
+  data.map("DATA",300,50,-1,50)
+
+  }
+  
+//----------- END Rate_ITD_EI() -------------------------
+//-------------------------------------------------------
+
+
+
+
+   //----- reset function for all simulations
+   //------------------------------------------
+  
+  proc reset() {
+  	
+       
+        //==== Reset membrane, synapse, and inputs
+        reset_membrane()
+	getcon()
+	getstim()	
+	changelevel()
+	
+
+	//==== Reset all vec and var 
+	N_run=10
+         
+        v_voltage=new Vector(tstop/dt+2,0)
+        v_voltage.record(&maincell.axon.v(0.5),dt)   // measure the midpoint of the axon
+
+  	v_AP=new Vector(N_run,0)
+  	mean_T=new Vector(N_run,0)
+  	sq_T=new Vector(N_run,0)
+  	num_T=new Vector(N_run,0)
+  	 	
+	T=gen0[0].interval
+	bin_ISI=bin
+  	topbin=int(10*T/bin_ISI)*bin_ISI  // 10 intervals and 1 for OVF
+  	OVFbin=int(1*T/bin_ISI)*bin_ISI
+  	  	
+  	mean_ISI2=0
+   	std_ISI=0
+   	sq_sum=0
+   	CV_ISI=0
+   	
+  	mean_ISI=0
+  	OVF=0
+  	EI=0
+  	
+  	hist_ISI=new Vector((topbin+OVFbin)/bin_ISI+1,0)
+	v_all=new Vector(tstop/dt+2,0)
+  	v_all.rebin(v_all,bin/dt)
+  
+  
+  }
+  
+  //---------- end reset() ----------------
+  //---------------------------------------
+  
+
+
+
+
+  
+  //----- Main simulation function --------------------
+  // Measure model response at one ITD condition  
+  //---------------------------------------------------
+
+
+  proc rerun() {
+        
+	 reset()
+
+  	//*********************************
+            while (N_run>0) {
+                v_ISI=new Vector()
+  		v_voltage=new Vector(tstop/dt+2,0)
+            	apc.record(v_ISI) 				//record event time
+  		v_voltage.record(&maincell.axon.v(0.5),dt)    // measure APs at the midpoint of the axon
+  		  		
+  		finitialize(v_init) 
+  		fcurrent()
+
+  		integrate()
+  		get_pth()
+  		get_ISI()
+                v_AP.x[N_run-1]=apc.n
+		N_run=N_run-1 	
+	  	} 
+
+   print "R=",v_AP.mean()
+   if(v_AP.size >1) {print "R_std=",v_AP.stdev()
+   		     print "R_sem=",v_AP.stderr() 
+			}
+   print "                "
+   N_run=10
+   
+   g_ISI.erase_all()
+   g_pth.erase_all()
+   ISI()
+   pth()
+   
+   //print "ISI mean=[ms]   ", mean_ISI/N_run
+   //print "T=  ",mean_ISI2
+   //print "T_std=  ",std_ISI
+   //print "T_CV=   ",CV_ISI
+   
+   //print "EI= ",EI
+   //print "OVF= ",OVF
+   print "----------- END -----------------------"
+}
+  
+  
+ proc integrate() {
+    
+    	while (t < tstop) {
+    		fadvance()  // advance solution 
+ 		 }
+  print "N_run=",N_run   // show run time 
+  print "spike number=",apc.n 
+  print "-------------------------"
+  //print "Number_input_E=",pre_E.size
+  //print "Number_input_I_contra=",pre_I_contra.size
+  //print "Number_input_I_ipsi=",pre_I_ipsi.size
+  //print "*************"
+  
+  if(v_ISI.size<=2) { v_ISI=new Vector(3,0) }
+  L_ISI=v_ISI.size
+  //print "L_ISI=",L_ISI
+  L_PTH=v_voltage.size		
+  //print "L_PTH=",L_PTH	
+}
+
+
+
+
+//******* update synapse and input information   ****
+//---------------------------------------------------
+  
+  proc save_con() {
+  	e0=syn0[0].con
+  	e1=syn1[0].con
+  	inhi0=syn_inhi0[0].con
+  	inhi1=syn_inhi1[0].con
+  	
+	contra_inhi_start=gen_inhi0[0].start
+	ipsi_inhi_start=gen_inhi1[0].start
+  }
+
+
+  proc changelevel() {
+	
+	x_thres_contra=1-Rave_E_contra*gen0[0].interval/1000        //   prob(x>1-p)=p
+    	x_thres_ipsi=1-Rave_E_ipsi*gen1[0].interval/1000        
+
+	x_thres_I_contra=1-Rave_I_contra*gen_inhi0[0].interval/1000        //   prob(x>1-p)=p
+        x_thres_I_ipsi=1-Rave_I_ipsi*gen_inhi1[0].interval/1000        
+      
+	if (x_thres_contra<=0) {x_thres_contra=1e-4} 
+        if (x_thres_ipsi<=0) {x_thres_ipsi=1e-4} 
+        if (x_thres_I_contra<=0) {x_thres_I_contra=1e-4} 
+        if (x_thres_I_ipsi<=0) {x_thres_I_ipsi=1e-4} 
+
+
+  	for i=0,9  { 
+    	netcon0[i].threshold=x_thres_contra  
+	netcon1[i].threshold=x_thres_ipsi
+
+	netcon_inhi0[i].threshold=x_thres_I_contra
+	netcon_inhi1[i].threshold=x_thres_I_ipsi	
+       }
+      
+  }
+
+  proc getcon() {
+		for i=0,9 {
+		syn0[i].con=syn0[0].con    //umho
+		syn1[i].con=syn1[0].con    //umho
+		
+		syn_inhi0[i].con=syn_inhi0[0].con    //umho
+		syn_inhi1[i].con=syn_inhi1[0].con    //umho
+
+		}
+		print "*******************"
+		print "syn0 con =",syn0[1].con
+		print "syn1 con =",syn1[1].con
+		print "*******************"
+		print "syn_inhi0 con =",syn_inhi0[1].con
+		print "syn_inhi1 con =",syn_inhi1[1].con
+		print "--------------------------"
+  }
+
+  proc getstim() {
+		//------- EE -------------
+		for i=0, 9{
+                gen0[i].interval=gen0[0].interval   // 
+  		gen0[i].start=gen0[0].start	  //  identify ITD
+		gen0[i].factor=gen0[0].factor	
+				
+		gen1[i].interval=gen1[0].interval   
+  		gen1[i].start=gen1[0].start	  //  identify ITD
+		gen1[i].factor=gen1[0].factor		
+  	        } 
+
+		//------- II-------------
+		for i=0, 9{
+                gen_inhi0[i].interval=gen_inhi0[0].interval   // 
+  		gen_inhi0[i].start=gen_inhi0[0].start	  
+		gen_inhi0[i].factor=gen_inhi0[0].factor	
+				
+		gen_inhi1[i].interval=gen_inhi1[0].interval   
+  		gen_inhi1[i].start=gen_inhi1[0].start	  
+		gen_inhi1[i].factor=gen_inhi1[0].factor		
+  	        } 	       
+       		
+  	        print "E0 start =",gen0[1].start
+		print "E0 interval =",gen0[1].interval
+		print "E1 start =",gen1[1].start
+		print "E1 interval =",gen1[1].interval  
+		print "*******************"
+		
+		print   "I0 inhi start =",gen_inhi0[1].start
+		print "I0 inhi interval =",gen_inhi0[1].interval
+		print   "I1 Inhi start =",gen_inhi1[1].start
+		print "I1 inhi interval =",gen_inhi1[1].interval
+		
+		print "*******************"
+				
+ }
+  //----------- END rerun() -----------------------------------
+  //-----------------------------------------------------------
+
+
+
+//------------------  END PART II ----------------------------
+
+
+
+
+
+
+  
+//------------------  PART III ---------------------------------------  
+// the user interface for adjusting the synapse and input parameters
+// and for the program control.   
+
+
+
+  //**** GUI  "synapse and stimuli"  ****
+  //---------------------------------------------
+  
+  objref syn_con, gen_start
+  
+  syn_con = new HBox()
+  syn_con.intercept(1)       
+  
+  xpanel("")
+  xlabel("E0 syn contra")
+  xvalue("G [nS]","syn0[0].con")
+  xlabel("E1 syn ipsi")
+  xvalue("G [nS]","syn1[0].con")
+  xpanel()
+  
+  xpanel("")
+  xlabel("I0 syn contra")
+  xvalue("G [nS]","syn_inhi0[0].con")
+  xlabel("I1 syn ipsi")
+  xvalue("G [nS]","syn_inhi1[0].con")
+  xpanel()
+  
+  xpanel("")
+  xlabel("Na at soma")
+  xvalue("na [S/cm2]","maincell.soma.gnabar_na_VCN2003")
+  
+  xpanel()
+  syn_con.intercept(0)       
+  syn_con.map("SYN",0,150,-1,50)              
+
+
+ //--------------------------------------------------------------------------
+
+  gen_start = new HBox()
+  gen_start.intercept(1)       
+  
+  xpanel("")
+  xlabel("E0 input contra")
+  xvalue("delay [ms]","gen0[0].start")
+  xvalue("period","gen0[0].interval")
+  xvalue("synchrony factor","gen0[0].factor")
+  xvalue("rate [spikes/sec]","Rave_E_contra")
+  
+  xlabel("E1 input ipsi")
+  xvalue("delay [ms]","gen1[0].start")
+  xvalue("period [ms]","gen1[0].interval")
+  xvalue("synchrony factor","gen1[0].factor")
+  xvalue("rate [spikes/sec]","Rave_E_ipsi")
+  xpanel()
+  
+  xpanel("")
+  xlabel("I0 input contra")
+  xvalue("delay [ms]","gen_inhi0[0].start")
+  xvalue("period","gen_inhi0[0].interval")
+  xvalue("synchrony factor","gen_inhi0[0].factor")
+  xvalue("rate [spikes/sec]","Rave_I_contra")
+  
+  xlabel("I1 input ipsi")
+  xvalue("delay [ms]","gen_inhi1[0].start")
+  xvalue("period [ms]","gen_inhi1[0].interval")
+  xvalue("synchrony factor","gen_inhi1[0].factor")
+  xvalue("rate [spikes/sec]", "Rave_I_ipsi")
+  xpanel()
+ 
+  gen_start.intercept(0)       
+  gen_start.map("GEN",0,350,-1,50)              
+
+  
+//--------------------------------------------------------------------------
+
+
+  objref boxv
+  boxv=new VBox()
+  boxv.intercept(1)
+  xpanel("")
+  xbutton("calculate VS of E0 input","VS()")
+  xvalue("vs")
+  xbutton("Reset","reset()")
+  xbutton("Single Run", "rerun()")
+  xbutton("Rate-ITD response with EE/II inputs","Rate_ITD_EI()")
+  xbutton("Quit", "quit()")
+  //xbutton("PSTH","psth()")
+  g_ISI=new Graph()
+  g_pth=new Graph()
+  xpanel()
+  boxv.intercept(0)
+  boxv.map("CONTROL",600,50,-1,50)
+  //----------------------------------------------------------------
+
+
+
+
+
+
+  //**** Electrotonic properties of the model  *****
+  //----------------------------------------------------------------
+
+  proc pas_membrane() {	
+
+    
+  	maincell.axon {
+		print "======================================"
+		area3=PI*diam*L
+		G_rest3=area3*g_rest3*10  //nS
+		Rm_rest3=1000/G_rest3    //Mohm
+		Ri_rest3=4*Ra*L/(100*PI*diam*diam)  //Mohm
+
+		R_inf3=2*sqrt(Ra/(gl_na_VCN2003*diam^3))/PI   //Mohm
+
+		lambda=100*sqrt(diam/(4*Ra*gl_na_VCN2003))
+		R_axon=R_inf3/tanh(L/lambda)
+
+		print "axon_area=[um^2]",area3
+		print "lambda_DC=[um]",lambda
+		print "total axon_conductance=[nS]",G_rest3
+		
+                print "seal-end input resistance=[Mohn]",R_axon
+		print "axon el=[mV]",el_na_VCN2003
+		print "g_rest=[S/cm2]",g_rest3
+		print "axon tau_rest=[ms]",cm/(g_rest3*1000)
+		print "======================"
+    	}           
+
+  	maincell.dend[0] {
+       		area2=PI*diam*L
+		G_rest2=area2*g_rest2*10  //nS
+		Rm_rest2=1000/G_rest2    //Mohm
+		Ri_rest2=4*Ra*L/(100*PI*diam*diam)  //Mohm
+
+		R_inf2=2*sqrt(Ra/(g_pas*diam^3))/PI   //Mohm
+
+		lambda=100*sqrt(diam/(4*Ra*g_rest2))
+		R_dend=R_inf2/tanh(L/lambda)
+
+		print "each dend_area=[um^2]",area2
+		print "lambda_DC=[um]",lambda
+		print "each dend_conductance=[nS]",G_rest2
+
+		print "seal-end input resistance=[Mohn]",R_dend
+		print "dend el=[mV]",e_pas
+		print "g_rest=[S/cm2]",g_rest2
+		print "dend tau_rest=[ms]",cm/(g_rest2*1000)
+		print "======================"
+   	 }
+
+
+	maincell.soma {
+		area1=PI*diam*L
+		G_rest1=area1*g_rest1*10  //nS
+		Rm_rest1=1000/G_rest1    //Mohm
+		Ri_rest1=4*Ra*L/(100*PI*diam*diam)  //Mohm
+		R_inf1=2*sqrt(Ra/(g_rest1*diam^3))/PI    //Mohm
+		
+		
+		
+		print "soma_area=[um^2]",area1
+		print "lamda_DC=[um]",lambda=100*sqrt(diam/(4*Ra*gl_na_VCN2003))
+		
+		print "total soma_conductance=[nS]",G_rest1
+		print "total membrane resistance=[Mohm]", Rm_rest1
+		print "soma el=[mV]",el_na_VCN2003
+		print "g_rest=[S/cm2]  ", g_rest1
+		print "soma tau_rest=[ms]",cm/(g_rest1*1000)
+		print "======================"
+
+		R_soma=R_inf1*(R_dend/2+R_inf1*tanh(L/lambda))/(R_inf1+R_dend*tanh(L/lambda)/2)
+		R_dend_soma=R_inf1*(R_dend+R_inf1*tanh(L/lambda))/(R_inf1+R_dend*tanh(L/lambda))
+    	}
+
+  
+	R_input=R_soma
+
+  
+
+
+print "input resistance=[Mohm]", R_input
+print "rho=",R_dend_soma/R_inf2
+
+}   // end of pas_membrane()
+
+  pas_membrane()
+
+  //-------  END Part III  ---------------------------------------------------------
+  
